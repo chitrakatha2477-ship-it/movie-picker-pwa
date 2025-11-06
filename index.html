@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Movie Picker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PWA Manifest Link - This tells the browser how to install the app -->
+    <link rel="manifest" href="manifest.json">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-blue': '#1D4ED8',
+                        'secondary-gray': '#E5E7EB',
+                        'dark-bg': '#0F172A',
+                        'light-card': '#1E293B',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0F172A; /* dark-bg */
+            color: #E5E7EB; /* secondary-gray */
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* Custom scrollbar for aesthetics */
+        .results-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .results-container::-webkit-scrollbar-thumb {
+            background: #374151; /* Gray-700 */
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="p-4">
+
+    <div id="app" class="w-full max-w-lg mx-auto bg-light-card p-6 md:p-8 rounded-xl shadow-2xl border border-gray-700">
+        <h1 class="text-3xl font-bold text-white mb-2 text-center">🍿 Movie Picker 🎬</h1>
+        <p class="text-gray-400 mb-6 text-center">Tell me what genre you're in the mood for!</p>
+
+        <div class="space-y-4">
+            <!-- Genre Input -->
+            <div>
+                <label for="genre-input" class="block text-sm font-medium text-gray-300 mb-1">Enter Genre (e.g., sci-fi, comedy, thriller):</label>
+                <input type="text" id="genre-input" placeholder="e.g., Adventure"
+                       class="w-full p-3 bg-gray-700 text-white border border-gray-600 rounded-lg focus:ring-primary-blue focus:border-primary-blue transition duration-150"
+                       aria-label="Movie Genre Input">
+            </div>
+
+            <!-- Action Button -->
+            <button id="pick-movie-button"
+                    class="w-full px-4 py-3 bg-primary-blue text-white font-semibold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300 ease-in-out transform hover:scale-[1.01] disabled:opacity-50 flex items-center justify-center">
+                <svg id="button-icon" class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Pick My Movie!
+            </button>
+        </div>
+
+        <!-- Result Display Area -->
+        <div id="result-area" class="mt-8 pt-6 border-t border-gray-700">
+            <h2 class="text-xl font-semibold text-white mb-4">Your Recommendation:</h2>
+            <div id="movie-title" class="text-2xl font-bold text-primary-blue mb-2 min-h-[1.5em]"></div>
+            <p id="movie-summary" class="text-gray-300 mb-4"></p>
+            <div id="citations" class="text-xs text-gray-500 max-h-24 overflow-y-auto results-container hidden">
+                <span class="font-semibold block mb-1">Sources:</span>
+                <ul id="citation-list" class="list-disc pl-5 space-y-1"></ul>
+            </div>
+            
+            <!-- Loading Indicator -->
+            <div id="loading-indicator" class="hidden text-center p-4">
+                <div class="flex items-center justify-center space-x-2">
+                    <svg class="animate-spin h-5 w-5 text-primary-blue" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-gray-400">Searching the depths of cinema...</span>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="error-message" class="hidden bg-red-800/30 border border-red-700 text-red-300 p-3 rounded-lg mt-4" role="alert">
+                An error occurred. Please try again.
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const apiKey = ""; // Canvas provides the key at runtime
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        // DOM Elements
+        const genreInput = document.getElementById('genre-input');
+        const pickMovieButton = document.getElementById('pick-movie-button');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const movieTitleEl = document.getElementById('movie-title');
+        const movieSummaryEl = document.getElementById('movie-summary');
+        const citationsContainer = document.getElementById('citations');
+        const citationList = document.getElementById('citation-list');
+        const errorMessage = document.getElementById('error-message');
+
+        /**
+         * Converts the fetch response to a JSON object, handling streaming issues.
+         * @param {Response} response - The fetch API response object.
+         * @returns {Promise<object>} The JSON body of the response.
+         */
+        async function getJsonResponse(response) {
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                return response.json();
+            } else {
+                const text = await response.text();
+                throw new Error(`Received non-JSON response: ${text}`);
+            }
+        }
+
+        /**
+         * Calls the Gemini API to get a movie recommendation with search grounding.
+         * Implements exponential backoff for retries.
+         * @param {string} genre - The movie genre requested by the user.
+         */
+        async function generateMovieSuggestion(genre) {
+            const systemPrompt = "You are a movie selection assistant. Your task is to recommend one single movie based on the user's requested genre. Only output the movie title followed by a colon, and then a concise one-sentence description. Do not add any conversational text, introductions, or extra details.";
+            const userQuery = `Recommend a single movie in the "${genre}" genre that is currently highly rated or popular, and provide a 1-2 sentence summary of it.`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                // Use Google Search grounding for up-to-date movie information
+                tools: [{ "google_search": {} }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            const maxRetries = 5;
+            let attempt = 0;
+
+            while (attempt < maxRetries) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429 && attempt < maxRetries - 1) {
+                        // Rate limit error (429) - wait and retry
+                        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        attempt++;
+                        continue;
+                    }
+
+                    if (!response.ok) {
+                        const errorBody = await getJsonResponse(response);
+                        console.error('API Error Response:', errorBody);
+                        throw new Error(`API call failed with status: ${response.status}`);
+                    }
+
+                    const result = await getJsonResponse(response);
+                    const candidate = result.candidates?.[0];
+
+                    if (!candidate || !candidate.content?.parts?.[0]?.text) {
+                        throw new Error("Invalid response structure or missing content from API.");
+                    }
+
+                    // 1. Extract the generated text
+                    const text = candidate.content.parts[0].text;
+
+                    // 2. Extract grounding sources
+                    let sources = [];
+                    const groundingMetadata = candidate.groundingMetadata;
+                    if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                        sources = groundingMetadata.groundingAttributions
+                            .map(attribution => ({
+                                uri: attribution.web?.uri,
+                                title: attribution.web?.title,
+                            }))
+                            .filter(source => source.uri && source.title); // Ensure sources are valid
+                    }
+
+                    return { text, sources };
+
+                } catch (error) {
+                    console.error("Fetch attempt failed:", error);
+                    if (attempt === maxRetries - 1) {
+                        throw error; // Re-throw the error on the last attempt
+                    }
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    attempt++;
+                }
+            }
+        }
+
+        /**
+         * Parses the raw text output into title and summary, and displays the result.
+         * @param {string} text - The raw text from the LLM.
+         * @param {Array<object>} sources - Array of citation sources.
+         */
+        function displayResult(text, sources) {
+            // Attempt to parse the expected "Title: Summary" format
+            let title = "Movie Recommendation";
+            let summary = text;
+
+            const splitIndex = text.indexOf(':');
+            if (splitIndex !== -1 && splitIndex < 50) { // Check if colon is present and relatively early
+                title = text.substring(0, splitIndex).trim();
+                summary = text.substring(splitIndex + 1).trim();
+            }
+
+            movieTitleEl.textContent = title;
+            movieSummaryEl.textContent = summary;
+
+            // Display Citations
+            citationList.innerHTML = '';
+            if (sources.length > 0) {
+                sources.forEach(source => {
+                    const listItem = document.createElement('li');
+                    const link = document.createElement('a');
+                    link.href = source.uri;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    link.textContent = source.title || source.uri;
+                    link.className = 'text-blue-400 hover:text-blue-300 underline';
+                    listItem.appendChild(link);
+                    citationList.appendChild(listItem);
+                });
+                citationsContainer.classList.remove('hidden');
+            } else {
+                citationsContainer.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Main handler for the button click.
+         */
+        async function handlePickMovie() {
+            const genre = genreInput.value.trim();
+
+            // Reset UI states
+            movieTitleEl.textContent = '';
+            movieSummaryEl.textContent = '';
+            citationList.innerHTML = '';
+            citationsContainer.classList.add('hidden');
+            errorMessage.classList.add('hidden');
+
+            if (genre.length < 2) {
+                movieTitleEl.textContent = 'Please enter a valid genre.';
+                return;
+            }
+
+            // Set loading state
+            pickMovieButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            
+            try {
+                const result = await generateMovieSuggestion(genre);
+                displayResult(result.text, result.sources);
+
+            } catch (error) {
+                console.error("Critical error in movie generation:", error);
+                errorMessage.classList.remove('hidden');
+                movieTitleEl.textContent = 'Generation Failed';
+                movieSummaryEl.textContent = 'Could not fetch a movie recommendation. Please check the console for details or try a different genre.';
+            } finally {
+                // Restore button state
+                pickMovieButton.disabled = false;
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        // Attach event listener
+        pickMovieButton.addEventListener('click', handlePickMovie);
+
+        // Allow pressing Enter key in the input field
+        genreInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handlePickMovie();
+            }
+        });
+        
+        // Initial state message
+        movieTitleEl.textContent = 'Waiting for your genre...';
+
+        // PWA Service Worker Registration (New Code)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                // Register the service worker file
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(registration => {
+                        console.log('SW registered: ', registration);
+                    })
+                    .catch(registrationError => {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+    </script>
+</body>
+</html>

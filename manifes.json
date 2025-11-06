@@ -1,0 +1,21 @@
+{
+  "name": "Movie Picker AI",
+  "short_name": "MoviePicker",
+  "description": "Get quick movie recommendations using AI and Google Search.",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#1D4ED8",
+  "icons": [
+    {
+      "src": "placeholder-icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "placeholder-icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
